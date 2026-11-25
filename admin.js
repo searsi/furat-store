@@ -1,18 +1,436 @@
+
 import {provinces} from './delivery.js';
-import {configured,load,save,login,logout,watch,el,picture,money} from './data.js';const $=id=>document.getElementById(id),sf=$('settings'),pf=$('product');let store,editing=null,busy=false;const status=t=>$('status').textContent=t;const field=(f,n)=>f.elements.namedItem(n);
-async function image(file){if(!file?.size)return null;const bitmap=await createImageBitmap(file);const c=document.createElement('canvas'),scale=Math.min(1,800/Math.max(bitmap.width,bitmap.height));c.width=Math.max(1,Math.round(bitmap.width*scale));c.height=Math.max(1,Math.round(bitmap.height*scale));const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(bitmap,0,0,c.width,c.height);bitmap.close();const data=c.toDataURL('image/jpeg',.75);if(data.length>280000)throw Error('الصورة كبيرة جداً');return data;}
-function reset(){editing=null;pf.reset();field(pf,'active').checked=true;$('heading').textContent='إضافة منتج'}$('reset').onclick=reset;
-function render(){renderDelivery();field(sf,'open').checked=store.open!==false; for(let i=1;i<=2;i++){field(sf,'banner'+i).value=store.banners?.[i-1]?.text||'';field(sf,'bannerImage'+i).value=''} field(sf,'name').value=store.name;field(sf,'whatsapp').value=store.whatsapp;field(sf,'categories').value=store.categories.join('\n');field(sf,'logo').value='';const sel=field(pf,'category');sel.replaceChildren(...store.categories.map(c=>el('option',c)));$('products').replaceChildren();for(const p of store.products){const d=el('article',undefined,'product');const edit=el('button','تعديل'),del=el('button','حذف','danger');edit.onclick=()=>{editing=p.id;for(const n of ['name','category','description'])field(pf,n).value=p[n];field(pf,'variants').value=p.variants.map(v=>`${v.name} | ${v.price} | ${v.sale??''} | ${v.stock??''}`).join('\n');field(pf,'active').checked=p.active;field(pf,'image').value='';$('heading').textContent='تعديل المنتج';tab('product');pf.scrollIntoView({behavior:'smooth'})};del.onclick=()=>{if(confirm('حذف المنتج؟'))commit({...store,products:store.products.filter(x=>x.id!==p.id)})};d.append(picture(p.image),el('h3',p.name),el('p',p.active?'ظاهر':'مخفي'),el('p',p.variants.map(v=>v.name+' '+money(v.price)).join(' / ')),edit,del);$('products').append(d)}}
-async function commit(next){if(busy)return;busy=true;try{await save(next,store);store=next;reset();render();status('تم الحفظ'+(!configured?' محلياً فقط':''))}catch(e){status('تعذر الحفظ: '+e.message)}finally{busy=false}}
-sf.onsubmit=async e=>{e.preventDefault();try{const f=new FormData(sf),categories=[...new Set(f.get('categories').split('\n').map(s=>s.trim()).filter(Boolean))];if(!categories.length||store.products.some(p=>!categories.includes(p.category)))throw Error('لا تحذف قسماً يحتوي على منتجات');await commit({...store,name:f.get('name').trim(),whatsapp:f.get('whatsapp').trim(),categories,open:f.has('open'),banners:await Promise.all([1,2].map(async i=>({text:f.get('banner'+i).trim(),image:await image(f.get('bannerImage'+i))||store.banners?.[i-1]?.image||''}))),logo:await image(f.get('logo'))||store.logo})}catch(e){status(e.message)}};
-pf.onsubmit=async e=>{e.preventDefault();try{const f=new FormData(pf),variants=f.get('variants').split('\n').filter(s=>s.trim()).map(s=>{const a=s.split('|');if(a.length<2||a.length>4||!a[0].trim()||!/^\d+$/.test(a[1].trim())||!Number.isSafeInteger(Number(a[1])))throw Error('تحقق من صيغة الأوزان والأسعار');const v={name:a[0].trim(),price:Number(a[1])};for(const [i,k] of [[2,'sale'],[3,'stock']]){if(a[i]?.trim()){const n=Number(a[i]);if(!/^\d+$/.test(a[i].trim())||!Number.isSafeInteger(n)||n<0||(k==='sale'&&n>=v.price))throw Error('تحقق من الخصم والمخزون');v[k]=n}}return v});if(!variants.length||new Set(variants.map(v=>v.name)).size!==variants.length)throw Error('أدخل خيارات مختلفة');const old=store.products.find(p=>p.id===editing),p={...old,id:editing||crypto.randomUUID(),name:f.get('name').trim(),category:f.get('category'),description:f.get('description'),active:f.has('active'),variants,image:await image(f.get('image'))||old?.image||''};await commit({...store,products:[...store.products.filter(x=>x.id!==p.id),p]})}catch(e){status(e.message)}};
-const df=$('delivery');
-function toggleDelivery(){const fixed=field(df,'mode').value==='fixed';$('fixedFee').hidden=!fixed;field(df,'fixed').disabled=!fixed;field(df,'fixed').required=fixed;$('rates').hidden=fixed;for(const input of $('rates').querySelectorAll('input')){input.disabled=fixed;input.required=!fixed;}}
-function renderDelivery(){const d=store.delivery||{};field(df,'mode').value=d.mode==='province'?'province':'fixed';field(df,'fixed').value=d.fixed??'';$('rates').replaceChildren();for(const p of provinces){const l=el('label',p),i=el('input');i.type='number';i.min='0';i.max='10000000';i.step='1';i.name=p;i.value=d.rates?.[p]??'';l.append(i);$('rates').append(l)}toggleDelivery();}
-field(df,'mode').onchange=toggleDelivery;
-df.onsubmit=async e=>{e.preventDefault();const mode=field(df,'mode').value,previous=store.delivery||{},read=n=>{const v=field(df,n).value;if(v===''||!Number.isSafeInteger(Number(v))||Number(v)<0||Number(v)>10000000)throw Error('أدخل أجوراً صحيحة');return Number(v)};try{const delivery={...previous,mode};if(mode==='fixed')delivery.fixed=read('fixed');else delivery.rates=Object.fromEntries(provinces.map(p=>[p,read(p)]));await commit({...store,delivery});}catch(e){status(e.message)}};
+import {configured,load,save,login,logout,watch,el,picture,money} from './data.js';
 
-$('login').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{await login(f.get('email'),f.get('password'));e.target.reset()}catch{status('تعذر تسجيل الدخول')}};$('logout').onclick=()=>logout();watch(async user=>{$('login').hidden=!configured||!!user;$('dashboard').hidden=true;if(configured&&!user)return;try{store=await load();render();$('dashboard').hidden=false;$('logout').hidden=!configured;status(configured?'':'وضع تجريبي محلي غير محمي — لا تستخدمه للنشر الحقيقي')}catch(e){status('تعذر التحميل: '+e.message)}});
+const $ = id => document.getElementById(id);
+const sf = $('settings');
+const pf = $('product');
 
-function tab(id){for(const key of ['list','product','settings','delivery'])$(key).hidden=key!==id;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.tab===id));}document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{if(b.dataset.tab==='product')reset();tab(b.dataset.tab)});tab('list');
+let store, editing = null, busy = false;
 
+const status = t => $('status').textContent = t;
+const field = (f,n) => f.elements.namedItem(n);
+
+async function image(file) {
+  if (!file?.size) return null;
+
+  const bitmap = await createImageBitmap(file);
+  const c = document.createElement('canvas');
+  const scale = Math.min(1,800/Math.max(bitmap.width,bitmap.height));
+
+  c.width = Math.max(1,Math.round(bitmap.width*scale));
+  c.height = Math.max(1,Math.round(bitmap.height*scale));
+
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0,0,c.width,c.height);
+  ctx.drawImage(bitmap,0,0,c.width,c.height);
+  bitmap.close();
+
+  const data = c.toDataURL('image/jpeg',.75);
+
+  if (data.length > 280000)
+    throw Error('الصورة كبيرة جداً');
+
+  return data;
+}
+
+function reset() {
+  editing = null;
+
+  HTMLFormElement.prototype.reset.call(pf);
+
+  field(pf,'active').checked = true;
+  $('heading').textContent = 'إضافة منتج';
+}
+
+$('reset').onclick = reset;
+
+function render() {
+  renderDelivery();
+
+  field(sf,'open').checked = store.open !== false;
+
+  for (let i=1;i<=2;i++) {
+    field(sf,'banner'+i).value =
+      store.banners?.[i-1]?.text || '';
+
+    field(sf,'bannerImage'+i).value = '';
+  }
+
+  field(sf,'name').value = store.name;
+  field(sf,'whatsapp').value = store.whatsapp;
+  field(sf,'categories').value = store.categories.join('\n');
+  field(sf,'logo').value = '';
+
+  const sel = field(pf,'category');
+
+  sel.replaceChildren(
+    ...store.categories.map(c=>el('option',c))
+  );
+
+  $('products').replaceChildren();
+
+  for (const p of store.products) {
+    const d = el('article',undefined,'product');
+    const edit = el('button','تعديل');
+    const del = el('button','حذف','danger');
+
+    edit.onclick = () => {
+      editing = p.id;
+
+      for (const n of ['name','category','description'])
+        field(pf,n).value = p[n];
+
+      field(pf,'variants').value = p.variants.map(
+        v=>`${v.name} | ${v.price} | ${v.sale??''} | ${v.stock??''}`
+      ).join('\n');
+
+      field(pf,'active').checked = p.active;
+      field(pf,'image').value = '';
+
+      $('heading').textContent = 'تعديل المنتج';
+
+      tab('product');
+
+      pf.scrollIntoView({behavior:'smooth'});
+    };
+
+    del.onclick = () => {
+      if (confirm('حذف المنتج؟')) {
+        commit({
+          ...store,
+          products:store.products.filter(x=>x.id!==p.id)
+        });
+      }
+    };
+
+    d.append(
+      picture(p.image),
+      el('h3',p.name),
+      el('p',p.active?'ظاهر':'مخفي'),
+      el('p',p.variants.map(
+        v=>v.name+' '+money(v.price)
+      ).join(' / ')),
+      edit,
+      del
+    );
+
+    $('products').append(d);
+  }
+}
+
+async function commit(next) {
+  if (busy) return;
+
+  busy = true;
+
+  try {
+    await save(next,store);
+
+    store = next;
+
+    reset();
+    render();
+
+    status('تم الحفظ'+(!configured?' محلياً فقط':''));
+
+  } catch(e) {
+    status('تعذر الحفظ: '+e.message);
+
+  } finally {
+    busy = false;
+  }
+}
+
+sf.onsubmit = async e => {
+  e.preventDefault();
+
+  try {
+    const f = new FormData(sf);
+
+    const categories = [...new Set(
+      f.get('categories')
+        .split('\n')
+        .map(s=>s.trim())
+        .filter(Boolean)
+    )];
+
+    if (
+      !categories.length ||
+      store.products.some(p=>!categories.includes(p.category))
+    ) {
+      throw Error('لا تحذف قسماً يحتوي على منتجات');
+    }
+
+    await commit({
+      ...store,
+
+      name:f.get('name').trim(),
+      whatsapp:f.get('whatsapp').trim(),
+      categories,
+
+      open:f.has('open'),
+
+      banners:await Promise.all(
+        [1,2].map(async i=>({
+          text:f.get('banner'+i).trim(),
+
+          image:
+            await image(f.get('bannerImage'+i)) ||
+            store.banners?.[i-1]?.image ||
+            ''
+        }))
+      ),
+
+      logo:await image(f.get('logo')) || store.logo
+    });
+
+  } catch(e) {
+    status(e.message);
+  }
+};
+
+pf.onsubmit = async e => {
+  e.preventDefault();
+
+  try {
+    const f = new FormData(pf);
+
+    const variants = f.get('variants')
+      .split('\n')
+      .filter(s=>s.trim())
+      .map(s=>{
+        const a = s.split('|');
+
+        if (
+          a.length < 2 ||
+          a.length > 4 ||
+          !a[0].trim() ||
+          !/^\d+$/.test(a[1].trim()) ||
+          !Number.isSafeInteger(Number(a[1]))
+        ) {
+          throw Error('تحقق من صيغة الأوزان والأسعار');
+        }
+
+        const v = {
+          name:a[0].trim(),
+          price:Number(a[1])
+        };
+
+        for (const [i,k] of [[2,'sale'],[3,'stock']]) {
+          if (a[i]?.trim()) {
+            const n = Number(a[i]);
+
+            if (
+              !/^\d+$/.test(a[i].trim()) ||
+              !Number.isSafeInteger(n) ||
+              n < 0 ||
+              (k==='sale' && n>=v.price)
+            ) {
+              throw Error('تحقق من الخصم والمخزون');
+            }
+
+            v[k] = n;
+          }
+        }
+
+        return v;
+      });
+
+    if (
+      !variants.length ||
+      new Set(variants.map(v=>v.name)).size !== variants.length
+    ) {
+      throw Error('أدخل خيارات مختلفة');
+    }
+
+    const old = store.products.find(p=>p.id===editing);
+
+    const p = {
+      ...old,
+
+      id:editing || crypto.randomUUID(),
+      name:f.get('name').trim(),
+      category:f.get('category'),
+      description:f.get('description'),
+      active:f.has('active'),
+      variants,
+
+      image:
+        await image(f.get('image')) ||
+        old?.image ||
+        ''
+    };
+
+    await commit({
+      ...store,
+      products:[
+        ...store.products.filter(x=>x.id!==p.id),
+        p
+      ]
+    });
+
+  } catch(e) {
+    status(e.message);
+  }
+};
+
+const df = $('delivery');
+
+function toggleDelivery() {
+  const fixed = field(df,'mode').value === 'fixed';
+
+  $('fixedFee').hidden = !fixed;
+
+  field(df,'fixed').disabled = !fixed;
+  field(df,'fixed').required = fixed;
+
+  $('rates').hidden = fixed;
+
+  for (const input of $('rates').querySelectorAll('input')) {
+    input.disabled = fixed;
+    input.required = !fixed;
+  }
+}
+
+function renderDelivery() {
+  const d = store.delivery || {};
+
+  field(df,'mode').value =
+    d.mode === 'province' ? 'province' : 'fixed';
+
+  field(df,'fixed').value = d.fixed ?? '';
+
+  $('rates').replaceChildren();
+
+  for (const p of provinces) {
+    const l = el('label',p);
+    const i = el('input');
+
+    i.type = 'number';
+    i.min = '0';
+    i.max = '10000000';
+    i.step = '1';
+    i.name = p;
+    i.value = d.rates?.[p] ?? '';
+
+    l.append(i);
+    $('rates').append(l);
+  }
+
+  toggleDelivery();
+}
+
+field(df,'mode').onchange = toggleDelivery;
+
+df.onsubmit = async e => {
+  e.preventDefault();
+
+  const mode = field(df,'mode').value;
+  const previous = store.delivery || {};
+
+  const read = n => {
+    const v = field(df,n).value;
+
+    if (
+      v === '' ||
+      !Number.isSafeInteger(Number(v)) ||
+      Number(v) < 0 ||
+      Number(v) > 10000000
+    ) {
+      throw Error('أدخل أجوراً صحيحة');
+    }
+
+    return Number(v);
+  };
+
+  try {
+    const delivery = {
+      ...previous,
+      mode
+    };
+
+    if (mode === 'fixed') {
+      delivery.fixed = read('fixed');
+
+    } else {
+      delivery.rates = Object.fromEntries(
+        provinces.map(p=>[p,read(p)])
+      );
+    }
+
+    await commit({
+      ...store,
+      delivery
+    });
+
+  } catch(e) {
+    status(e.message);
+  }
+};
+
+$('login').onsubmit = async e => {
+  e.preventDefault();
+
+  const f = new FormData(e.target);
+
+  try {
+    await login(
+      f.get('email'),
+      f.get('password')
+    );
+
+    e.target.reset();
+
+  } catch {
+    status('تعذر تسجيل الدخول');
+  }
+};
+
+$('logout').onclick = () => logout();
+
+watch(async user => {
+  $('login').hidden = !configured || !!user;
+  $('dashboard').hidden = true;
+
+  if (configured && !user) return;
+
+  try {
+    store = await load();
+
+    render();
+
+    $('dashboard').hidden = false;
+    $('logout').hidden = !configured;
+
+    status(
+      configured
+        ? ''
+        : 'وضع تجريبي محلي غير محمي — لا تستخدمه للنشر الحقيقي'
+    );
+
+  } catch(e) {
+    status('تعذر التحميل: '+e.message);
+  }
+});
+
+function tab(id) {
+  for (const key of ['list','product','settings','delivery']) {
+    $(key).hidden = key !== id;
+  }
+
+  document.querySelectorAll('[data-tab]').forEach(b=>{
+    b.classList.toggle('selected',b.dataset.tab===id);
+  });
+}
+
+document.querySelectorAll('[data-tab]').forEach(b=>{
+  b.onclick = () => {
+    if (b.dataset.tab === 'product') reset();
+
+    tab(b.dataset.tab);
+  };
+});
+
+tab('list');
