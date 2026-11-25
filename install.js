@@ -1,0 +1,1 @@
+let promptEvent;const install=document.getElementById('install');window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();promptEvent=e;install.hidden=false});install.onclick=async()=>{if(promptEvent){await promptEvent.prompt();promptEvent=null;install.hidden=true}};if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(console.warn);
